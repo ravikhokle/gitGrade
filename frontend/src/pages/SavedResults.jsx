@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 export default function SavedResults({ user }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,7 +16,7 @@ export default function SavedResults({ user }) {
   const fetchResults = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get('http://localhost:5000/api/saved', {
+      const res = await axios.get(`${API_URL}/api/saved`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setResults(res.data);
@@ -28,7 +30,7 @@ export default function SavedResults({ user }) {
   const handleDelete = async (id) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(`http://localhost:5000/api/saved/${id}`, {
+      await axios.delete(`${API_URL}/api/saved/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setResults(results.filter(r => r._id !== id));

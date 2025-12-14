@@ -2,6 +2,8 @@ import { useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 export default function Home({ user }) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +19,7 @@ export default function Home({ user }) {
     setResult(null);
     setSaved(false);
     try {
-      const response = await axios.post('http://localhost:5000/api/repos/evaluate', { url });
+      const response = await axios.post(`${API_URL}/api/repos/evaluate`, { url });
       setResult(response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'An error occurred');
@@ -31,7 +33,7 @@ export default function Home({ user }) {
     setSaving(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/api/saved', {
+      await axios.post(`${API_URL}/api/saved`, {
         repoUrl: result.repoUrl,
         score: result.score,
         skillLevel: result.skillLevel,

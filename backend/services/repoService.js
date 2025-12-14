@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLONE_DIR = path.join(__dirname, '..', 'cloned_repos');
 
-const octokit = new Octokit(); // No auth needed for public repos
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN }); // Token for higher rate limit
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 

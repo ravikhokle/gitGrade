@@ -16,6 +16,9 @@ build/
 .next/
 out/
 
+# Cloned repos
+backend/cloned_repos/
+
 # Logs
 logs/
 *.log

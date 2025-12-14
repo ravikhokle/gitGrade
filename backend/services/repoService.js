@@ -4,11 +4,34 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import Evaluation from '../models/Evaluation.js';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CLONE_DIR = path.join(__dirname, '..', 'cloned_repos');
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN }); // optional, for higher rate limit
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+// Ensure clone directory exists
+async function ensureCloneDir() {
+  try {
+    await fs.mkdir(CLONE_DIR, { recursive: true });
+  } catch (e) {}
+}
+
+// Schedule deletion after 10 minutes
+function scheduleDelete(dirPath) {
+  setTimeout(async () => {
+    try {
+      await fs.rm(dirPath, { recursive: true, force: true });
+      console.log(`Deleted cloned repo: ${dirPath}`);
+    } catch (e) {
+      console.error(`Failed to delete ${dirPath}:`, e.message);
+    }
+  }, 2 * 60 * 1000); // 2 minutes
+}
 
 async function evaluateRepo(url) {
   // Parse URL - strip .git suffix if present
@@ -39,7 +62,8 @@ async function evaluateRepo(url) {
   }
 
   // Clone repo for analysis
-  const tempDir = path.join(os.tmpdir(), `gitgrade-${Date.now()}`);
+  await ensureCloneDir();
+  const tempDir = path.join(CLONE_DIR, `${repo}-${Date.now()}`);
   await simpleGit().clone(`https://github.com/${owner}/${repo}.git`, tempDir);
 
   // Analyze
@@ -49,21 +73,25 @@ async function evaluateRepo(url) {
   const score = computeScore(metrics, repoData.data, languages.data, commits.data, contributors);
 
   // Use Gemini for summary and roadmap
-  const { summary, roadmap } = await generateInsights(metrics, score, repoData.data);
+  const insights = await generateInsights(metrics, score, repoData.data);
+  
+  // Use AI score/level if available, otherwise use calculated
+  const finalScore = insights.aiScore || Math.round(score);
+  const finalLevel = insights.aiLevel || getSkillLevel(score);
 
   // Save to DB
   const evaluation = new Evaluation({
     repoUrl: normalizedUrl,
-    score: Math.round(score),
-    skillLevel: getSkillLevel(score),
-    summary,
-    roadmap,
+    score: finalScore,
+    skillLevel: finalLevel,
+    summary: insights.summary,
+    roadmap: insights.roadmap,
     metrics
   });
   await evaluation.save();
 
-  // Cleanup
-  await fs.rm(tempDir, { recursive: true, force: true });
+  // Schedule cleanup after 10 minutes
+  scheduleDelete(tempDir);
 
   return evaluation;
 }
@@ -231,45 +259,64 @@ function computeScore(metrics, repo, languages, commits, contributors) {
 }
 
 function getSkillLevel(score) {
-  if (score >= 80) return 'Expert';
-  if (score >= 60) return 'Advanced';
+  if (score >= 70) return 'Advanced';
   if (score >= 40) return 'Intermediate';
-  if (score >= 20) return 'Beginner';
-  return 'Novice';
+  return 'Beginner';
 }
 
 async function generateInsights(metrics, score, repoData) {
-  const prompt = `You are a senior developer mentor. Based on the following GitHub repository analysis, provide feedback.
+  const prompt = `You are a senior software engineer and technical recruiter.
+
+Your task is to evaluate a GitHub repository based on structured repository signals and produce an honest, human-like assessment.
 
 Repository: ${repoData.name}
 Description: ${repoData.description || 'No description'}
-Score: ${score}/100
+Calculated Score: ${score}/100
 
-Metrics:
-- Files: ${metrics.fileCount} total, ${metrics.codeFiles} code files
-- Folders: ${metrics.folderCount} (depth: ${metrics.folderDepth})
-- README: ${metrics.hasReadme ? `Yes (quality: ${metrics.readmeQuality}/5, length: ${metrics.readmeLength} chars)` : 'Missing'}
-- Tests: ${metrics.hasTests ? `Yes (${metrics.testFileCount} test files)` : 'None detected'}
-- License: ${metrics.hasLicense ? 'Yes' : 'No'}
-- .gitignore: ${metrics.hasGitignore ? 'Yes' : 'No'}
-- CI/CD: ${metrics.hasCICD ? 'Yes' : 'No'}
-- Commit Frequency: ${metrics.commitFrequency}
-- Total Commits: ${metrics.commitCount}
+Repository Metrics:
+- Project Structure: ${metrics.fileCount} files, ${metrics.folderCount} folders (depth: ${metrics.folderDepth})
+- Code Files: ${metrics.codeFiles} code files, ${metrics.configFiles} config files
+- Documentation: ${metrics.hasReadme ? `README present (quality: ${metrics.readmeQuality}/5, ${metrics.readmeLength} chars)` : 'No README'}
+- Testing: ${metrics.hasTests ? `${metrics.testFileCount} test files detected` : 'No tests detected'}
+- Git Best Practices: ${metrics.hasGitignore ? '.gitignore ✓' : '.gitignore ✗'}, ${metrics.hasLicense ? 'License ✓' : 'License ✗'}
+- CI/CD: ${metrics.hasCICD ? 'Configured' : 'Not configured'}
+- Commit History: ${metrics.commitCount} commits, frequency: ${metrics.commitFrequency}
 
-Respond in this exact JSON format:
+Your responsibilities:
+1. Assign a fair score out of 100 based on overall engineering quality
+2. Classify the developer as Beginner, Intermediate, or Advanced
+3. Write a concise, honest summary highlighting strengths and weaknesses
+4. Generate a personalized, actionable improvement roadmap that feels like guidance from an AI coding mentor
+
+Rules:
+- Be honest, not polite
+- Do not exaggerate strengths
+- Clearly point out missing best practices
+- Focus on practical improvements
+- Assume the developer wants to grow professionally
+
+Output strictly in JSON with keys: score, level, summary, roadmap
+Example format:
 {
-  "summary": "A 2-3 sentence evaluation of the repository's strengths and weaknesses",
-  "roadmap": "Step 1: [action]\\nStep 2: [action]\\nStep 3: [action]\\nStep 4: [action]\\nStep 5: [action]"
-}
-
-Be specific and actionable. Focus on the most impactful improvements first.`;
+  "score": 65,
+  "level": "Intermediate",
+  "summary": "Honest 2-3 sentence evaluation...",
+  "roadmap": "Step 1: [specific action]\\nStep 2: [specific action]\\nStep 3: [specific action]\\nStep 4: [specific action]\\nStep 5: [specific action]"
+}`;
 
   try {
     const result = await model.generateContent(prompt);
     const response = result.response.text();
     const cleaned = response.replace(/```json\n?|\n?```/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    return parsed;
+    
+    // Use AI's score and level if provided, otherwise use calculated
+    return {
+      summary: parsed.summary,
+      roadmap: parsed.roadmap,
+      aiScore: parsed.score,
+      aiLevel: parsed.level
+    };
   } catch (error) {
     // Fallback if Gemini fails
     return {

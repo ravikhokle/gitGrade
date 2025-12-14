@@ -3,6 +3,8 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import repoRoutes from './routes/repoRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import savedRoutes from './routes/savedRoutes.js';
 
 dotenv.config();
 
@@ -20,6 +22,8 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gitgrade'
 
 // Routes
 app.use('/api/repos', repoRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/saved', savedRoutes);
 
 // Health check
 app.get('/', (req, res) => res.send('GitGrade Backend Running'));

@@ -1,0 +1,17 @@
+GitGrade - How It Works
+=======================
+
+1. User enters GitHub repo URL
+2. Backend fetches repo data via GitHub API
+3. Clones repo to system temp folder (os.tmpdir), analyzes files, then deletes it
+4. Calculates score (0-100) using weighted metrics:
+   - Code Structure: 20 pts (file count, folder organization)
+   - Documentation: 20 pts (README presence & quality)
+   - Testing: 15 pts (test files detected)
+   - Version Control: 15 pts (.gitignore, commit frequency)
+   - Project Setup: 15 pts (license, CI/CD)
+   - Community: 15 pts (stars, forks, contributors)
+5. Gemini AI generates summary and improvement roadmap (only metadata sent, no code)
+6. Returns score + summary + roadmap to frontend
+
+Tech: React + Tailwind | Node + Express | MongoDB | Gemini API

@@ -38,7 +38,7 @@ JWT_SECRET=your_secret
 
 **Frontend (.env)**
 ```
-VITE_API_URL=http://localhost:5000
+VITE_API_URL=http://localhost:5173
 ```
 
 ## Features

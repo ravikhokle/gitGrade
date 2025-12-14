@@ -4,6 +4,8 @@ Evaluate any public GitHub repository and get a score, summary, and personalized
 
 Check Live: https://gitgradefront.onrender.com
 
+Video Link of website working: https://drive.google.com/file/d/16a_e6sIsFLWLBg6F7O93SpFjbURbJYsc/view?usp=sharing
+
 ## Tech Stack
 
 - **Frontend**: React, Tailwind CSS, Vite

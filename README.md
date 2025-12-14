@@ -2,9 +2,9 @@
 
 GitHub repository evaluator that generates scores, summaries, and personalized roadmaps.
 
-Ìºê **Live:** https://gitgradefront.onrender.com
+**Live:** https://gitgradefront.onrender.com
 
-Ìæ• **Demo:** https://drive.google.com/file/d/16a_e6sIsFLWLBg6F7O93SpFjbURbJYsc/view
+**Demo:** https://drive.google.com/file/d/16a_e6sIsFLWLBg6F7O93SpFjbURbJYsc/view
 
 ## Approach
 

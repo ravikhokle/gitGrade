@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLONE_DIR = path.join(__dirname, '..', 'cloned_repos');
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN }); // optional, for higher rate limit
+const octokit = new Octokit(); // No auth needed for public repos
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
@@ -21,7 +21,7 @@ async function ensureCloneDir() {
   } catch (e) {}
 }
 
-// Schedule deletion after 10 minutes
+// Schedule deletion after 2 minutes
 function scheduleDelete(dirPath) {
   setTimeout(async () => {
     try {
@@ -43,12 +43,23 @@ async function evaluateRepo(url) {
   // Normalize URL for caching
   const normalizedUrl = `https://github.com/${owner}/${repo}`;
 
-  // Check cache
-  const existing = await Evaluation.findOne({ repoUrl: normalizedUrl });
-  if (existing) return existing;
-
-  // Fetch repo data from GitHub API
+  // Fetch repo data from GitHub API first to check for updates
   const repoData = await octokit.repos.get({ owner, repo });
+  const repoUpdatedAt = new Date(repoData.data.pushed_at); // Last push time
+
+  // Check cache - only use if repo hasn't been updated since last evaluation
+  const existing = await Evaluation.findOne({ repoUrl: normalizedUrl });
+  if (existing && existing.createdAt >= repoUpdatedAt) {
+    console.log('Using cached evaluation - repo unchanged since last evaluation');
+    return existing;
+  }
+
+  // If repo was updated, delete old evaluation to create fresh one
+  if (existing) {
+    await Evaluation.deleteOne({ repoUrl: normalizedUrl });
+    console.log('Repo updated - creating fresh evaluation');
+  }
+
   const languages = await octokit.repos.listLanguages({ owner, repo });
   const commits = await octokit.repos.listCommits({ owner, repo, per_page: 100 });
   
@@ -61,13 +72,27 @@ async function evaluateRepo(url) {
     contributors = [];
   }
 
+  // Fetch branches count
+  let branchCount = 1;
+  try {
+    const branches = await octokit.repos.listBranches({ owner, repo });
+    branchCount = branches.data.length;
+  } catch (e) {}
+
+  // Fetch pull requests count
+  let prCount = 0;
+  try {
+    const prs = await octokit.pulls.list({ owner, repo, state: 'all', per_page: 100 });
+    prCount = prs.data.length;
+  } catch (e) {}
+
   // Clone repo for analysis
   await ensureCloneDir();
   const tempDir = path.join(CLONE_DIR, `${repo}-${Date.now()}`);
   await simpleGit().clone(`https://github.com/${owner}/${repo}.git`, tempDir);
 
   // Analyze
-  const metrics = await analyzeRepo(tempDir, repoData.data, commits.data);
+  const metrics = await analyzeRepo(tempDir, repoData.data, commits.data, branchCount, prCount);
 
   // Compute score
   const score = computeScore(metrics, repoData.data, languages.data, commits.data, contributors);
@@ -90,13 +115,13 @@ async function evaluateRepo(url) {
   });
   await evaluation.save();
 
-  // Schedule cleanup after 10 minutes
+  // Schedule cleanup after 2 minutes
   scheduleDelete(tempDir);
 
   return evaluation;
 }
 
-async function analyzeRepo(dir, repoData, commits) {
+async function analyzeRepo(dir, repoData, commits, branchCount = 1, prCount = 0) {
   const metrics = {
     fileCount: 0,
     folderCount: 0,
@@ -113,7 +138,8 @@ async function analyzeRepo(dir, repoData, commits) {
     languages: [],
     commitCount: commits.length,
     commitFrequency: 'low',
-    hasMultipleBranches: false,
+    branchCount: branchCount,
+    prCount: prCount,
     codeFiles: 0,
     configFiles: 0
   };
@@ -236,9 +262,11 @@ function computeScore(metrics, repo, languages, commits, contributors) {
 
   // Version Control (15 points)
   let vcScore = 0;
-  vcScore += metrics.hasGitignore ? 5 : 0;
-  vcScore += metrics.commitFrequency === 'high' ? 6 : metrics.commitFrequency === 'medium' ? 4 : 2;
-  vcScore += commits.length > 20 ? 4 : commits.length > 5 ? 2 : 0;
+  vcScore += metrics.hasGitignore ? 3 : 0;
+  vcScore += metrics.commitFrequency === 'high' ? 4 : metrics.commitFrequency === 'medium' ? 2 : 1;
+  vcScore += commits.length > 20 ? 3 : commits.length > 5 ? 2 : 0;
+  vcScore += metrics.branchCount > 1 ? 3 : 0; // multiple branches
+  vcScore += metrics.prCount > 0 ? 2 : 0; // has PRs
   score += Math.min(vcScore, weights.versionControl);
 
   // Project Setup (15 points)
@@ -281,6 +309,8 @@ Repository Metrics:
 - Git Best Practices: ${metrics.hasGitignore ? '.gitignore ✓' : '.gitignore ✗'}, ${metrics.hasLicense ? 'License ✓' : 'License ✗'}
 - CI/CD: ${metrics.hasCICD ? 'Configured' : 'Not configured'}
 - Commit History: ${metrics.commitCount} commits, frequency: ${metrics.commitFrequency}
+- Branches: ${metrics.branchCount} branch(es)
+- Pull Requests: ${metrics.prCount} PR(s)
 
 Your responsibilities:
 1. Assign a fair score out of 100 based on overall engineering quality
